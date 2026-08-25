@@ -1,5 +1,7 @@
+allure-python-commons
 python-dotenv==1.2.2
 selenium==4.46.0
 pytest==9.1.1
 faker==40.36.0
 webdriver-manager==4.1.2
+allure-pytest==2.13.5
