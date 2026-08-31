@@ -27,19 +27,28 @@ def setup_logging():
     yield
 
 
+def pytest_addoption(parser):
+    parser.addoption("--browser", action="store", default="chrome")
+
+
 @pytest.fixture()
-def browser() -> Generator[LocalWebDriver, None, None]:
-    browser_name: str = os.getenv("BROWSER").strip().lower()
+def browser(request) -> Generator[LocalWebDriver, None, None]:
+    browser_name: str = request.config.getoption("--browser").strip().lower()
 
     if browser_name == "chrome":
         chrome_options: ChromeOptions = webdriver.ChromeOptions()
         chrome_options.add_argument("--start-maximized")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--headless")
         driver: LocalWebDriver = webdriver.Chrome(
             service=Service(), options=chrome_options
         )
     elif browser_name == "firefox":
         firefox_options = webdriver.FirefoxOptions()
         firefox_options.add_argument("--start-maximized")
+        firefox_options.add_argument("--headless")
+
         driver = webdriver.Firefox(options=firefox_options)
     else:
         raise BrowserNotSupportedError(f"Browser {browser_name} is not supported")
