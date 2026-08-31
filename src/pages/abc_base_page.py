@@ -8,12 +8,12 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 
+
 class AbcBasePage(ABC):
     _driver: LocalWebDriver
     _wait: WebDriverWait
     _base_url: str
     _path: str
-
 
     def __init__(self, driver: LocalWebDriver, path: str):
         self._driver = driver
