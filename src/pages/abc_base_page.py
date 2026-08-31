@@ -14,6 +14,7 @@ class AbcBasePage(ABC):
     _base_url: str
     _path: str
 
+
     def __init__(self, driver: LocalWebDriver, path: str):
         self._driver = driver
         self._wait = WebDriverWait(driver=self._driver, timeout=10)
