@@ -1,0 +1,207 @@
+services:
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: admin
+    ports:
+      - "8888:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - selenoid
+      - selenoid2
+
+  db:
+    image: mysql:5.7
+    container_name: mysql_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: admin
+      MYSQL_DATABASE: prestashop
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-padmin"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - selenoid
+      - selenoid2
+
+  prestashop:
+    image: prestashop/prestashop:8.2.7
+    container_name: prestashop
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    environment:
+      DB_SERVER: db
+      DB_NAME: prestashop
+      DB_USER: root
+      DB_PASSWD: admin
+      PS_INSTALL_AUTO: "1"
+      PS_LANGUAGE: "en"
+      PS_COUNTRY: "US"
+      ADMIN_MAIL: "admin@example.com"
+      ADMIN_PASSWD: "Admin123!"
+      PS_FOLDER_ADMIN: "administration"
+      PS_FOLDER_INSTALL: "install"
+      PS_DOMAIN: "prestashop"
+      PS_BASE_URL: "http://prestashop"
+    volumes:
+      - ps_data:/var/www/html
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - selenoid
+      - selenoid2
+
+  prestashop_postinstall:
+    image: alpine:3.19
+    container_name: prestashop_postinstall
+    restart: "no"
+    depends_on:
+      - prestashop
+    volumes:
+      - ps_data:/var/www/html
+    command: >
+      sh -lc '
+        apk add --no-cache curl >/dev/null 2>&1 || true;
+
+        echo "Waiting for PrestaShop HTTP to respond...";
+        until curl -fsS http://prestashop/ >/dev/null; do sleep 5; done;
+
+        echo "Waiting for config to exist...";
+        until [ -f /var/www/html/config/settings.inc.php ] || [ -f /var/www/html/app/config/parameters.php ]; do sleep 2; done;
+
+        echo "Extra grace period...";
+        sleep 15;
+
+        echo "Removing install folders...";
+        rm -rf /var/www/html/install /var/www/html/install-dev || true;
+
+        echo "Clearing cache...";
+        rm -rf /var/www/html/var/cache/* || true;
+
+        echo "Done."
+      '
+    networks:
+      - selenoid
+      - selenoid2
+
+  selenoid:
+    image: aerokube/selenoid:1.11.3
+    hostname: selenoid
+    depends_on:
+      - prestashop_postinstall
+    environment:
+      DOCKER_API_VERSION: "1.40"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./selenoid_python/browsers.json:/etc/selenoid/browsers.json:ro
+    networks:
+      - selenoid
+    command: -container-network=selenoid
+
+  selenoid2:
+    image: aerokube/selenoid:1.11.3
+    hostname: selenoid2
+    depends_on:
+      - prestashop_postinstall
+    environment:
+      DOCKER_API_VERSION: "1.40"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./selenoid_python/browsers.json:/etc/selenoid/browsers.json:ro
+    command: -container-network=selenoid2
+    networks:
+      - selenoid2
+
+  ggr:
+    image: aerokube/ggr:1.7.2
+    volumes:
+      - ./grid-router:/etc/grid-router:ro
+    hostname: ggr
+    networks:
+      - selenoid
+      - selenoid2
+    depends_on:
+      - selenoid
+      - selenoid2
+    command: -guests-allowed -guests-quota "test" -verbose
+
+  ggr_ui:
+    image: aerokube/ggr-ui:1.2.0
+    hostname: ggr_ui
+    networks:
+      - selenoid
+      - selenoid2
+    volumes:
+      - ./grid-router/quota:/etc/grid-router/quota:ro
+    depends_on:
+      - selenoid
+      - selenoid2
+
+  selenoid_ui:
+    image: aerokube/selenoid-ui:1.10.11
+    hostname: selenoid_ui
+    networks:
+      - selenoid
+    depends_on:
+      - ggr_ui
+    command: --selenoid-uri http://ggr_ui:8888
+
+  nginx:
+    image: nginx:latest
+    hostname: nginx
+    ports:
+      - 80:80
+    networks:
+      - selenoid
+    volumes:
+      - ./selenoid_python/nginx:/etc/nginx/conf.d:ro
+    depends_on:
+      - selenoid_ui
+      - ggr
+
+  tests:
+    build: .
+    container_name: tests
+    depends_on:
+      prestashop:
+        condition: service_started
+      selenoid:
+        condition: service_started
+    environment:
+        BASE_URL: http://prestashop
+        ADMIN_EMAIL: "admin@example.com"
+        ADMIN_PASSWORD: "Admin123!"
+        SELENOID_URL: http://ggr:4444/wd/hub
+    volumes:
+      - ./allure-results:/app/allure-results
+    networks:
+      - selenoid
+      - selenoid2
+
+networks:
+  selenoid:
+    external: true
+    name: selenoid
+  selenoid2:
+    external: true
+    name: selenoid2
+
+volumes:
+  db_data:
+    driver: local
+  ps_data:
+    driver: local

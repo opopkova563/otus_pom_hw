@@ -1,8 +1,8 @@
-import os
 from collections.abc import Generator
 
 import allure
 import pytest
+from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver import ChromeOptions
 from selenium.webdriver.chrome.service import Service
@@ -18,6 +18,8 @@ from src.pages.catalog_page import CatalogPage
 from src.pages.home_page import HomePage
 from src.pages.product_card_page import ProductCardPage
 
+load_dotenv('.env.test')
+
 logger = setup_logger()
 
 
@@ -29,13 +31,31 @@ def setup_logging():
 
 def pytest_addoption(parser):
     parser.addoption("--browser", action="store", default="chrome")
+    parser.addoption("--selenoid-url", action="store", default="http://188.130.251.59/wd/hub",
+                     help="Selenoid URL (e.g., http://188.130.251.59/wd/hub)")
 
 
 @pytest.fixture()
 def browser(request) -> Generator[LocalWebDriver, None, None]:
     browser_name: str = request.config.getoption("--browser").strip().lower()
+    selenoid_url = request.config.getoption("--selenoid-url", default=None)
 
-    if browser_name == "chrome":
+    if selenoid_url:
+        if browser_name == "chrome":
+            options = ChromeOptions()
+        elif browser_name == "firefox":
+            options = webdriver.FirefoxOptions()
+
+        options.set_capability("browserName", browser_name)
+        options.set_capability("selenoid:options", {
+            "enableVideo": False,
+            "enableVNC": True,
+            "name": f"test_{request.node.name}",
+            "sessionTimeout": "10m"
+        })
+
+        driver: LocalWebDriver = webdriver.Remote(command_executor=selenoid_url, options=options)
+    elif browser_name == "chrome":
         chrome_options: ChromeOptions = webdriver.ChromeOptions()
         chrome_options.add_argument("--start-maximized")
         chrome_options.add_argument("--no-sandbox")
