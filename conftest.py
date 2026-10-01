@@ -7,6 +7,7 @@ from selenium import webdriver
 from selenium.webdriver import ChromeOptions
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.webdriver import LocalWebDriver
+from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support.events import EventFiringWebDriver
 
 import logger_config
@@ -30,55 +31,130 @@ def setup_logging():
 
 
 def pytest_addoption(parser):
-    parser.addoption("--browser", action="store", default="chrome")
-    parser.addoption("--selenoid-url", action="store", default="http://188.130.251.59/wd/hub",
-                     help="Selenoid URL (e.g., http://188.130.251.59/wd/hub)")
+    parser.addoption(
+        "--browser",
+        action="store",
+        default="chrome",
+        choices=["chrome", "firefox"],
+        help="Браузер: chrome или firefox. По умолчанию chrome"
+    )
+
+    parser.addoption(
+        "--browser-version",
+        action="store",
+        default=None,
+        help="Версия браузера для Selenoid, например: 128.0"
+    )
+
+    parser.addoption(
+        "--selenoid-url",
+        action="store",
+        default=None,
+        help="URL Selenoid/GGR, например: http://localhost/wd/hub"
+    )
 
 
 @pytest.fixture()
 def browser(request) -> Generator[LocalWebDriver, None, None]:
     browser_name: str = request.config.getoption("--browser").strip().lower()
-    selenoid_url = request.config.getoption("--selenoid-url", default=None)
+    browser_version: str | None = request.config.getoption("--browser-version")
+    selenoid_url: str | None = request.config.getoption("--selenoid-url", default=None)
 
     if selenoid_url:
-        if browser_name == "chrome":
-            options = ChromeOptions()
-        elif browser_name == "firefox":
-            options = webdriver.FirefoxOptions()
-
-        options.set_capability("browserName", browser_name)
-        options.set_capability("selenoid:options", {
-            "enableVideo": False,
-            "enableVNC": True,
-            "name": f"test_{request.node.name}",
-            "sessionTimeout": "10m"
-        })
-
-        driver: LocalWebDriver = webdriver.Remote(command_executor=selenoid_url, options=options)
-    elif browser_name == "chrome":
-        chrome_options: ChromeOptions = webdriver.ChromeOptions()
-        chrome_options.add_argument("--start-maximized")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--headless")
-        driver: LocalWebDriver = webdriver.Chrome(
-            service=Service(), options=chrome_options
-        )
-    elif browser_name == "firefox":
-        firefox_options = webdriver.FirefoxOptions()
-        firefox_options.add_argument("--start-maximized")
-        firefox_options.add_argument("--headless")
-
-        driver = webdriver.Firefox(options=firefox_options)
+            driver = _create_remote_driver(
+                browser_name=browser_name,
+                browser_version=browser_version,
+                selenoid_url=selenoid_url,
+                test_name=request.node.name,
+            )
     else:
-        raise BrowserNotSupportedError(f"Browser {browser_name} is not supported")
+        driver = _create_local_driver(browser_name)
+
     listener = logger_config.CustomListener()
-    driver = EventFiringWebDriver(driver, listener)
+    event_driver = EventFiringWebDriver(driver, listener)
 
-    yield driver
+    yield event_driver
 
-    driver.quit()
-    logger.info("Браузер закрыт.\n")
+    event_driver.quit()
+    logger.info("Браузер закрыт.")
+
+
+def _create_remote_driver(browser_name: str,
+        browser_version: str | None,
+        selenoid_url: str,
+        test_name: str,
+                    ) -> WebDriver:
+    if browser_name == "chrome":
+        options = webdriver.ChromeOptions()
+        options.add_argument("--window-size=1920,1080")
+
+    elif browser_name == "firefox":
+        options = webdriver.FirefoxOptions()
+        options.add_argument("--width=1920")
+        options.add_argument("--height=1080")
+
+    else:
+        raise BrowserNotSupportedError(
+            f"Browser '{browser_name}' is not supported. "
+            "Supported browsers: chrome, firefox."
+        )
+
+    if browser_version:
+        options.browser_version = browser_version
+
+    options.set_capability(
+        "selenoid:options",
+        {
+            "enableVNC": True,
+            "enableVideo": False,
+            "name": f"test_{test_name}",
+            "sessionTimeout": "10m",
+        },
+    )
+
+    logger.info(
+        "Удаленный запуск: browser=%s, version=%s, url=%s",
+        browser_name,
+        browser_version or "default",
+        selenoid_url,
+    )
+
+    return webdriver.Remote(
+        command_executor=selenoid_url,
+        options=options,
+    )
+
+
+def _create_local_driver(browser_name: str) -> WebDriver:
+    if browser_name == "chrome":
+        options = ChromeOptions()
+        options.add_argument("--start-maximized")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--headless=new")
+
+        logger.info("Локальный запуск Chrome")
+
+        return webdriver.Chrome(
+            service=Service(),
+            options=options,
+        )
+
+    if browser_name == "firefox":
+        options = webdriver.FirefoxOptions()
+        options.add_argument("--headless")
+        options.add_argument("--width=1920")
+        options.add_argument("--height=1080")
+
+        logger.info("Локальный запуск Firefox")
+
+        return webdriver.Firefox(options=options)
+
+    raise BrowserNotSupportedError(
+        f"Browser '{browser_name}' is not supported. "
+        "Supported browsers: chrome, firefox."
+    )
+
 
 
 @pytest.fixture
@@ -112,7 +188,6 @@ def pytest_runtest_makereport(item, call):
     rep = outcome.get_result()
 
     if rep.when == "call" and rep.failed:
-        # Ищем фикстуру с драйвером (например, 'driver' или 'browser')
         driver = item.funcargs.get("browser")
         if driver is not None:
             try:

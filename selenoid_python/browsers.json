@@ -6,6 +6,11 @@
         "image": "selenoid/chrome:128.0",
         "port": "4444",
         "path": "/"
+      },
+      "127.0": {
+        "image": "selenoid/chrome:127.0",
+        "port": "4444",
+        "path": "/"
       }
     }
   },
@@ -14,6 +19,11 @@
     "versions": {
       "125.0": {
         "image": "selenoid/firefox:125.0",
+        "port": "4444",
+        "path": "/wd/hub"
+      },
+      "124.0": {
+        "image": "selenoid/firefox:124.0",
         "port": "4444",
         "path": "/wd/hub"
       }
